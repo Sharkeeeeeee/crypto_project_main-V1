@@ -62,6 +62,7 @@ interface PoolInfo {
   stable?: boolean;
   price: number; // Strictly TokenB / TokenA
   liquidityUSD: number;
+  extraData?: string;
 }
 
 interface PriceDiscrepancy {
@@ -352,6 +353,7 @@ export class PoolScanner {
           fee: stable ? 1 : 30, // 0.01% stable, 0.3% volatile
           stable,
           price,
+          extraData: ethers.AbiCoder.defaultAbiCoder().encode(["bool"], [stable]),
           liquidityUSD: 0, // Will be calculated later
         });
       } catch (e) {

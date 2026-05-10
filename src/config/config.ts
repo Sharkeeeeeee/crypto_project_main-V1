@@ -45,7 +45,7 @@ export const ADDRESSES = {
 
 // ── Execution Parameters ─────────────────────────────────────
 export const EXECUTION = {
-  MIN_PROFIT_USD: parseFloat(process.env.MIN_PROFIT_USD || "1.50"),
+  MIN_PROFIT_USD: parseFloat(process.env.MIN_PROFIT_USD || "0.50"),
   MAX_GAS_PRICE_GWEI: parseFloat(process.env.MAX_GAS_PRICE_GWEI || "5"),
   DEFAULT_LOAN_AMOUNT: BigInt(process.env.DEFAULT_LOAN_AMOUNT || "1000000000000000000"),
   GAS_BUFFER_MULTIPLIER: 1.2,
@@ -58,7 +58,7 @@ export const SCANNER = {
   // [v3.1] Block-aligned: Base produces blocks every 2s.
   // Polling faster wastes QuickNode API credits for zero benefit.
   SCAN_INTERVAL_MS: parseInt(process.env.SCAN_INTERVAL_MS || "2000"),
-  MIN_SPREAD_PCT: parseFloat(process.env.MIN_SPREAD_PCT || "0.8"),
+  MIN_SPREAD_PCT: parseFloat(process.env.MIN_SPREAD_PCT || "0.3"),
   MIN_MARKET_CAP: parseFloat(process.env.MIN_MARKET_CAP || "20000"),
   MAX_MARKET_CAP: parseFloat(process.env.MAX_MARKET_CAP || "200000"),
   MIN_LIQUIDITY_USD: 5000,
@@ -120,6 +120,22 @@ export interface ArbitragePath {
   profitUSD: number;
   confidence: number;
   timestamp: number;
+}
+
+export interface PoolInfo {
+  address: string;
+  dexId: DexId;
+  token0: string;
+  token1: string;
+  tokenA: string;
+  tokenB: string;
+  reserve0: bigint;
+  reserve1: bigint;
+  fee: number;
+  stable?: boolean;
+  price: number;
+  liquidityUSD: number;
+  extraData?: string;
 }
 
 export interface SwapStep {

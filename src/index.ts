@@ -32,6 +32,7 @@ import { TransactionBuilder } from "./executor/transactionBuilder";
 import { PrivateRpcManager } from "./ghost/privateRpc";
 import { NonceManager } from "./ghost/nonceManager";
 import { Notifier } from "./utils/notifier";
+import { DiscordController } from "./utils/discordBot";
 
 // Config
 import {
@@ -61,6 +62,7 @@ class IronShieldEngine {
   private txBuilder!: TransactionBuilder;
   private ghostRpc!: PrivateRpcManager;
   private nonceManager!: NonceManager;
+  private dcBot?: DiscordController;
 
   // State
   private isRunning: boolean = false;
@@ -153,6 +155,19 @@ class IronShieldEngine {
     );
     await this.nonceManager.initialize();
 
+    // Initialize Discord Bot (Remote Control)
+    const botToken = process.env.DISCORD_BOT_TOKEN;
+    const adminId = process.env.DISCORD_ADMIN_ID || "";
+    
+    if (botToken) {
+      this.dcBot = new DiscordController(botToken, adminId, {
+        onStart: () => this.start(),
+        onStop: () => this.stop(),
+        getStatus: () => analytics.generateReport(),
+      });
+      await this.dcBot.initialize();
+    }
+
     log.info("✅ All modules initialized successfully");
   }
 
@@ -193,6 +208,7 @@ class IronShieldEngine {
       }
     }, SCANNER.SCAN_INTERVAL_MS);
   }
+
 
   /**
    * Execute one complete scan → simulate → execute cycle
@@ -401,17 +417,29 @@ class IronShieldEngine {
   }
 
   /**
-   * Graceful shutdown
+   * Graceful/Emergency shutdown
    */
   async stop(): Promise<void> {
+    if (!this.isRunning) {
+      log.warn("Engine is not running");
+      return;
+    }
+
     log.info("🛑 Shutting down IronShield engine...");
     this.isRunning = false;
 
-    if (this.scanTimer) clearInterval(this.scanTimer);
-    if (this.backupTimer) clearInterval(this.backupTimer);
+    if (this.scanTimer) {
+      clearInterval(this.scanTimer);
+      this.scanTimer = null;
+    }
+    if (this.backupTimer) {
+      clearInterval(this.backupTimer);
+      this.backupTimer = null;
+    }
 
     createHourlyBackup();
     log.info(analytics.generateReport());
+    await Notifier.notifySystem("🛑 Engine Stopped", "The engine has been shut down successfully.");
     log.info("👋 Engine stopped. See you next time.");
   }
 }
