@@ -17,6 +17,7 @@ dotenv.config();
 import { ethers } from "ethers";
 import { createModuleLogger, createHourlyBackup } from "./utils/logger";
 import { analytics } from "./utils/analytics";
+import { getEthPriceUSD } from "./utils/prices";
 
 // Module imports
 import { PoolScanner } from "./filter/poolScanner";
@@ -352,7 +353,7 @@ class IronShieldEngine {
           simResult.path.steps[0].tokenIn,
           simResult.profitUSD,
           tx.hash,
-          Number(ethers.formatEther(gasUsedWei)) * 3000 // Placeholder ETH price for notification
+          Number(ethers.formatEther(gasUsedWei)) * (await getEthPriceUSD())
         );
       } else {
         analytics.recordExecution(

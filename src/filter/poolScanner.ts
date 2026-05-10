@@ -179,8 +179,10 @@ export class PoolScanner {
           const bestBuy = pools.reduce((a, b) => (a.price < b.price ? a : b));
           const bestSell = pools.reduce((a, b) => (a.price > b.price ? a : b));
 
-          // [v3.4 Fix] Correct fee scale: bps / 100 = percentage (e.g., 60 bps -> 0.6%)
-          const totalFeesPct = (bestBuy.fee + bestSell.fee) / 100;
+          // [v3.5 Fix] Unit-Adaptive Fee Scaling
+          // UniV3: 3000 = 0.3% (divide by 10000) | Others: 30 = 0.3% (divide by 100)
+          const getFeePct = (pool: any) => pool.dexId === DexId.UNISWAP_V3 ? pool.fee / 10000 : pool.fee / 100;
+          const totalFeesPct = getFeePct(bestBuy) + getFeePct(bestSell);
 
           const spread = ((maxPrice - minPrice) / minPrice) * 100;
           const netSpread = spread - totalFeesPct;

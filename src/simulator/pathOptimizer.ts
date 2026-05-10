@@ -135,9 +135,16 @@ export class PathOptimizer {
       
       const assetPriceUSD = path.assetPriceUSD || (assetAddress.toLowerCase() === ADDRESSES.WETH.toLowerCase() ? ethPrice : 1.0);
 
+      // [v3.6 Fallback] If outputAmount is 1n, it means we are on a public RPC
+      // and couldn't read the state change. We trust the scanner's estimate
+      // if the simulation (eth_call) succeeded.
+      const actualOutput = simResult.outputAmount === 1n 
+        ? loanAmount + path.estimatedProfit 
+        : simResult.outputAmount;
+
       const profitInfo = await this.profitCalc.calculateNetProfit(
         loanAmount,
-        simResult.outputAmount, // Use actual output from simulation
+        actualOutput,
         simResult.gasUsed,
         gasPrice,
         assetDecimals,
