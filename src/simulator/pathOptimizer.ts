@@ -59,7 +59,7 @@ export class PathOptimizer {
     const results: SimulationResult[] = [];
     const concurrency = Math.min(paths.length, SCANNER.MAX_CONCURRENT_SIMULATIONS);
 
-    log.info(`⚡ Simulating ${paths.length} paths (concurrency: ${concurrency})`);
+    log.debug(`⚡ Simulating ${paths.length} paths (concurrency: ${concurrency})`);
 
     for (let i = 0; i < paths.length; i += concurrency) {
       const batch = paths.slice(i, i + concurrency);

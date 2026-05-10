@@ -118,7 +118,7 @@ export class PoolScanner {
 
     try {
       const tokenPairs = this.generateTokenPairs();
-      log.info(
+      log.debug(
         `Scanning ${tokenPairs.length} token pairs (chunk: ${SCANNER.POOL_SCAN_CHUNK_SIZE}, jitter: ${SCANNER.POOL_SCAN_JITTER_MS}ms)`
       );
 
@@ -133,7 +133,7 @@ export class PoolScanner {
       for (let i = 0; i < tokenPairs.length; i += SCANNER.POOL_SCAN_CHUNK_SIZE) {
         const chunk = tokenPairs.slice(i, i + SCANNER.POOL_SCAN_CHUNK_SIZE);
         const progress = Math.min(i + SCANNER.POOL_SCAN_CHUNK_SIZE, tokenPairs.length);
-        log.info(`⏳ Processing pairs ${i + 1}-${progress} of ${tokenPairs.length}...`);
+        log.debug(`⏳ Processing pairs ${i + 1}-${progress} of ${tokenPairs.length}...`);
 
         const chunkResults = await Promise.all(
           chunk.map(async ([tokenA, tokenB], idx) => {
@@ -217,7 +217,7 @@ export class PoolScanner {
         }
       }
 
-      log.info(`✅ Scan complete: ${discrepancies.length} opportunities found`);
+      log.debug(`✅ Scan complete: ${discrepancies.length} opportunities found`);
     } catch (error: any) {
       log.error(`Scan failed: ${error.message}`);
     }

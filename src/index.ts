@@ -30,6 +30,7 @@ import { ContractDeployer } from "./executor/contractDeployer";
 import { TransactionBuilder } from "./executor/transactionBuilder";
 import { PrivateRpcManager } from "./ghost/privateRpc";
 import { NonceManager } from "./ghost/nonceManager";
+import { Notifier } from "./utils/notifier";
 
 // Config
 import {
@@ -165,6 +166,11 @@ class IronShieldEngine {
 
     this.isRunning = true;
     log.info(`🚀 Engine started! Scan interval: ${SCANNER.SCAN_INTERVAL_MS}ms`);
+    
+    await Notifier.notifySystem(
+      "🚀 Engine Started",
+      `Mode: ${process.argv.find((a) => a.startsWith("--mode="))?.split("=")[1] || "full"}\nScan Interval: ${SCANNER.SCAN_INTERVAL_MS}ms`
+    );
 
     // Start hourly backup timer
     this.backupTimer = setInterval(() => {
@@ -207,7 +213,7 @@ class IronShieldEngine {
 
       // Build arbitrage paths from discrepancies
       const paths = await this.scanner.buildArbitragePaths(discrepancies);
-      log.info(`📊 ${paths.length} potential paths identified`);
+      log.debug(`📊 ${paths.length} potential paths identified`);
 
       // ── Phase 2: Filter & Audit tokens ───────────────────
       const safePaths = await this.filterPaths(paths);
@@ -230,6 +236,18 @@ class IronShieldEngine {
       if (profitablePaths.length === 0) {
         log.debug("No profitable paths after simulation");
         return;
+      }
+
+      // [v3.1] Notify high-profit opportunities (> $5.0 USD)
+      const topOp = profitablePaths[0];
+      if (topOp.profitUSD >= 5.0) {
+        const routeStr = topOp.path.steps.map(s => `${s.dexId === 0 ? "AERO" : s.dexId === 1 ? "UniV3" : "BaseSwap"}`).join(" → ");
+        await Notifier.notifyOpportunity(
+          topOp.path.steps[0].tokenIn,
+          topOp.profitUSD,
+          0,
+          routeStr
+        );
       }
 
       // ── Phase 4: Execute best path ───────────────────────
@@ -297,7 +315,7 @@ class IronShieldEngine {
       if (isSafe) safePaths.push(path);
     }
 
-    log.info(`🔒 ${safePaths.length}/${paths.length} paths passed safety filters`);
+    log.debug(`🔒 ${safePaths.length}/${paths.length} paths passed safety filters`);
     return safePaths;
   }
 
@@ -329,6 +347,13 @@ class IronShieldEngine {
           profit: simResult.profitUSD,
           gas: ethers.formatEther(gasUsedWei),
         });
+
+        await Notifier.notifyProfit(
+          simResult.path.steps[0].tokenIn,
+          simResult.profitUSD,
+          tx.hash,
+          Number(ethers.formatEther(gasUsedWei)) * 3000 // Placeholder ETH price for notification
+        );
       } else {
         analytics.recordExecution(
           {
@@ -343,6 +368,7 @@ class IronShieldEngine {
           simResult.path.id
         );
         log.error(`Arbitrage FAILED: TX reverted ${tx.hash}`);
+        await Notifier.notifyFailure(tx.hash, "Transaction reverted", simResult.profitUSD);
       }
     } catch (error: any) {
       log.error(`Execution error: ${error.message}`);

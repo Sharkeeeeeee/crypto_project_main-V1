@@ -27,6 +27,7 @@ export interface IronShieldExecutorInterface extends Interface {
   getFunction(
     nameOrSignature:
       | "AERODROME_ROUTER"
+      | "BASESWAP_ROUTER"
       | "UNISWAP_V3_ROUTER"
       | "aavePool"
       | "blacklistToken"
@@ -54,6 +55,10 @@ export interface IronShieldExecutorInterface extends Interface {
 
   encodeFunctionData(
     functionFragment: "AERODROME_ROUTER",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "BASESWAP_ROUTER",
     values?: undefined
   ): string;
   encodeFunctionData(
@@ -104,6 +109,10 @@ export interface IronShieldExecutorInterface extends Interface {
 
   decodeFunctionResult(
     functionFragment: "AERODROME_ROUTER",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "BASESWAP_ROUTER",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -264,6 +273,8 @@ export interface IronShieldExecutor extends BaseContract {
 
   AERODROME_ROUTER: TypedContractMethod<[], [string], "view">;
 
+  BASESWAP_ROUTER: TypedContractMethod<[], [string], "view">;
+
   UNISWAP_V3_ROUTER: TypedContractMethod<[], [string], "view">;
 
   aavePool: TypedContractMethod<[], [string], "view">;
@@ -332,6 +343,9 @@ export interface IronShieldExecutor extends BaseContract {
 
   getFunction(
     nameOrSignature: "AERODROME_ROUTER"
+  ): TypedContractMethod<[], [string], "view">;
+  getFunction(
+    nameOrSignature: "BASESWAP_ROUTER"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
     nameOrSignature: "UNISWAP_V3_ROUTER"
