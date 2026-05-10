@@ -1,0 +1,41 @@
+{
+  "name": "ironshield-arbitrage-engine",
+  "version": "1.0.0",
+  "description": "IronShield Atomic Arbitrage Engine - Base Chain MEV Tactical System",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "ts-node src/index.ts",
+    "scan": "ts-node src/index.ts --mode=scan",
+    "simulate": "ts-node src/index.ts --mode=simulate",
+    "execute": "ts-node src/index.ts --mode=execute",
+    "deploy": "npx hardhat run scripts/deploy.ts --network base",
+    "deploy:fork": "npx hardhat run scripts/deploy.ts --network hardhat",
+    "fork": "npx hardhat node --fork https://mainnet.base.org",
+    "compile": "npx hardhat compile",
+    "test": "npx hardhat test",
+    "analytics": "ts-node src/utils/analytics.ts"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.6.1",
+    "aes-js": "^4.0.0-beta.5",
+    "axios": "^1.7.0",
+    "chalk": "^4.1.2",
+    "cron": "^3.1.7",
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.0",
+    "p-limit": "^3.1.0",
+    "winston": "^3.14.0"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-ethers": "^3.0.0",
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@typechain/ethers-v6": "^0.5.0",
+    "@typechain/hardhat": "^9.0.0",
+    "@types/node": "^20.14.0",
+    "hardhat": "^2.22.0",
+    "ts-node": "^10.9.0",
+    "typechain": "^8.3.0",
+    "typescript": "^5.5.0"
+  }
+}
