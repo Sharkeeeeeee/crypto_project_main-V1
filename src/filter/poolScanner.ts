@@ -336,7 +336,8 @@ export class PoolScanner {
           token0,
           token0.toLowerCase() === tokenA.toLowerCase() ? tokenB : tokenA,
           tokenA,
-          tokenB
+          tokenB,
+          stable
         );
 
         pools.push({
@@ -477,7 +478,8 @@ export class PoolScanner {
           pool.token0,
           pool.token1,
           tokenA,
-          tokenB
+          tokenB,
+          pool.stable || false
         );
 
         return { ...pool, reserve0: reserves.reserve0, reserve1: reserves.reserve1, price };
@@ -510,7 +512,8 @@ export class PoolScanner {
     token0: string,
     token1: string,
     tokenA: string,
-    tokenB: string
+    tokenB: string,
+    stable: boolean = false
   ): Promise<number> {
     if (reserve0 === 0n || reserve1 === 0n) return 0;
 
@@ -522,7 +525,19 @@ export class PoolScanner {
     const r0 = Number(reserve0) / 10 ** dec0;
     const r1 = Number(reserve1) / 10 ** dec1;
 
-    // [v3.3 Fix] Standardize: If token0 is tokenA, then token1 is tokenB. Price = r1 / r0 (B/A).
+    // [v3.7 Fix] Handle stable pools correctly.
+    // In stable pools (x^3y + y^3x = k), the spot price is very close to 1.0 
+    // unless reserves are extremely skewed. Simple r1/r0 fails here.
+    if (stable) {
+      const isStablePair =
+        (tokenA.toLowerCase() === ADDRESSES.USDC.toLowerCase() && tokenB.toLowerCase() === ADDRESSES.USDbC.toLowerCase()) ||
+        (tokenA.toLowerCase() === ADDRESSES.USDbC.toLowerCase() && tokenB.toLowerCase() === ADDRESSES.USDC.toLowerCase()) ||
+        (tokenA.toLowerCase() === ADDRESSES.DAI.toLowerCase() && tokenB.toLowerCase() === ADDRESSES.USDC.toLowerCase());
+      
+      if (isStablePair) return 1.0;
+    }
+
+    // [v3.3 Fix] Standardize for volatile pools: If token0 is tokenA, then token1 is tokenB. Price = r1 / r0 (B/A).
     // If token0 is tokenB, then token1 is tokenA. Price = r0 / r1 (B/A).
     return token0.toLowerCase() === tokenA.toLowerCase() ? r1 / r0 : r0 / r1;
   }
