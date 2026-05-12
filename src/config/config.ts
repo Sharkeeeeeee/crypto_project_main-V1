@@ -12,6 +12,7 @@ export const ADDRESSES = {
   UNISWAP_V3_ROUTER: "0x2626664c2603336E57B271c5C0b26F421741e481",
   UNISWAP_UNIVERSAL_ROUTER: "0x6fF5693b99212Da76ad316178A184AB56D299b43",
   BASESWAP_ROUTER: "0x327Df1E6de05895d2ab08513aaDD9313Fe505d86",
+  BASESWAP_FACTORY: "0xFDA619b6d20975be89A1033f03F704621ad70775",
 
   // Core Tokens
   WETH: "0x4200000000000000000000000000000000000006",
@@ -29,23 +30,20 @@ export const ADDRESSES = {
 
   // ── Long-Tail Assets (Rotation Scanning) ─────────────────────
   EXTENDED_WHITELIST: [
-    "0x9401518f97F590d2217F769E6dBa6ca9a27489E8", // AERO (Real)
-    "0x0b3e32845582222397134546a39399C0ac7324A4", // VIRTUAL (Real)
+    "0x940181a94A35A4569E4529A3CDfB74e38FD98631", // AERO (Correct)
+    "0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b", // VIRTUAL (Correct)
     "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf", // cbBTC
-    "0x4ed4E281567A09b113703273a3A82D853a779dfA", // DEGEN (Real)
-    "0x532f27101965dd1d567a5E6d93026615ee742bb1", // BRETT (Real)
-    "0xAC1Bd2465aA515910006945042443b961c7c0146", // TOSHI (Real)
-    "0x05767d9Ef41Dc40689678fFca0608878fb3dE906", // HIGHER (Real)
-    "0x9D092780e037f6aB5812B7D034346899E054e04f", // KEYCAT (Real)
-    "0xA88594d27230024576a45EF99086127d1958Ae03", // WELL (Real)
-    "0x2416092f143378750bb29b79eD961ab195CcEea5", // ezETH (Real)
-    "0xd9831d10457635c9D4883f8D9197063f6834458D", // LUNA (Real AI Agent)
+    "0x4ed4e862860bed51a9570b96d89af5e1b0efefed", // DEGEN (Correct)
+    "0x532f27101965dd16442e59d40670faf5ebb142e4", // BRETT (Correct)
+    "0xAC1Bd2465aA515910006945042443b961c7c0146", // TOSHI
+    "0x05767d9Ef41Dc40689678fFca0608878fb3dE906", // HIGHER
+    "0x9D092780e037f6aB5812B7D034346899E054e04f", // KEYCAT
   ],
 } as const;
 
 // ── Execution Parameters ─────────────────────────────────────
 export const EXECUTION = {
-  MIN_PROFIT_USD: parseFloat(process.env.MIN_PROFIT_USD || "0.50"),
+  MIN_PROFIT_USD: parseFloat(process.env.MIN_PROFIT_USD || "2.0"),
   MAX_GAS_PRICE_GWEI: parseFloat(process.env.MAX_GAS_PRICE_GWEI || "5"),
   DEFAULT_LOAN_AMOUNT: BigInt(process.env.DEFAULT_LOAN_AMOUNT || "1000000000000000000"),
   GAS_BUFFER_MULTIPLIER: 1.2,
@@ -57,8 +55,8 @@ export const EXECUTION = {
 export const SCANNER = {
   // [v3.1] Block-aligned: Base produces blocks every 2s.
   // Polling faster wastes QuickNode API credits for zero benefit.
-  SCAN_INTERVAL_MS: parseInt(process.env.SCAN_INTERVAL_MS || "2000"),
-  MIN_SPREAD_PCT: parseFloat(process.env.MIN_SPREAD_PCT || "0.3"),
+  SCAN_INTERVAL_MS: parseInt(process.env.SCAN_INTERVAL_MS || "3000"),
+  MIN_SPREAD_PCT: parseFloat(process.env.MIN_SPREAD_PCT || "0.1"),
   MIN_MARKET_CAP: parseFloat(process.env.MIN_MARKET_CAP || "20000"),
   MAX_MARKET_CAP: parseFloat(process.env.MAX_MARKET_CAP || "200000"),
   MIN_LIQUIDITY_USD: 5000,
@@ -66,9 +64,9 @@ export const SCANNER = {
   MAX_CONCURRENT_SIMULATIONS: 5,
   // [v3.1] Maximum pools to query in a single concurrent batch.
   // Prevents RPS spikes when scanning multiple DEX pools.
-  POOL_SCAN_CHUNK_SIZE: parseInt(process.env.POOL_SCAN_CHUNK_SIZE || "5"),
+  POOL_SCAN_CHUNK_SIZE: parseInt(process.env.POOL_SCAN_CHUNK_SIZE || "10"),
   // [v3.1] Jitter delay (ms) between firing requests in a batch.
-  POOL_SCAN_JITTER_MS: parseInt(process.env.POOL_SCAN_JITTER_MS || "50"),
+  POOL_SCAN_JITTER_MS: parseInt(process.env.POOL_SCAN_JITTER_MS || "100"),
 } as const;
 
 // ── RPC Configuration ────────────────────────────────────────

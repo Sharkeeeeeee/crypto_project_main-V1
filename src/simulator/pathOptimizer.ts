@@ -152,6 +152,21 @@ export class PathOptimizer {
         callData
       );
 
+      // [v4.6] Diagnostic Logging
+      if (profitInfo.netProfitUSD < EXECUTION.MIN_PROFIT_USD) {
+        log.debug(
+          `📉 Path Rejected: ${path.id} | ` +
+          `Gross: $${profitInfo.contractProfitUSD.toFixed(3)} | ` +
+          `Gas: $${profitInfo.totalGasCostUSD.toFixed(3)} | ` +
+          `Net: $${profitInfo.netProfitUSD.toFixed(3)}`
+        );
+      } else {
+        log.info(
+          `💰 Profitable Path: ${path.id} | ` +
+          `Net Profit: $${profitInfo.netProfitUSD.toFixed(2)}`
+        );
+      }
+
       return {
         path,
         success: profitInfo.isProfitable,

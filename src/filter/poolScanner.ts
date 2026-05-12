@@ -25,21 +25,24 @@ const UNISWAP_V3_POOL_ABI = [
   "function slot0() view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)",
   "function liquidity() view returns (uint128)",
   "function token0() view returns (address)",
-  "function token1() view returns (address)",
-  "function fee() view returns (uint24)",
 ];
+
+const AERODROME_POOL_ABI = [
+  "function reserves() view returns (uint256 reserve0, uint256 reserve1)",
+  "function getReserves() view returns (uint256 reserve0, uint256 reserve1, uint256 blockTimestampLast)",
+];
+
+const MULTICALL3_ABI = [
+  "function aggregate3(tuple(address target, bool allowFailure, bytes callData)[] calls) view returns (tuple(bool success, bytes returnData)[] returnData)",
+];
+
+const MULTICALL3_ADDRESS = "0xca11bde05977b3631167028862be2a173976ca11";
 
 const AERODROME_FACTORY_ABI = [
   "function allPoolsLength() view returns (uint256)",
   "function allPools(uint256 index) view returns (address)",
   "function getPool(address tokenA, address tokenB, bool stable) view returns (address)",
-];
-
-const AERODROME_POOL_ABI = [
-  "function getReserves() view returns (uint256 reserve0, uint256 reserve1, uint256 blockTimestampLast)",
-  "function token0() view returns (address)",
-  "function token1() view returns (address)",
-  "function stable() view returns (bool)",
+  "function getPair(address tokenA, address tokenB) view returns (address)", // Added for UniV2 forks
 ];
 
 const ERC20_ABI = [
@@ -80,12 +83,13 @@ export class PoolScanner {
   private provider: ethers.JsonRpcProvider;
   private uniV3Factory: Contract;
   private aeroFactory: Contract;
+  private baseSwapFactory: Contract;
   private knownTokens: Map<string, { symbol: string; decimals: number }> = new Map();
   private discoveredPools: Map<string, PoolInfo> = new Map();
 
   // 1. 新增輪詢狀態
   private rotationIndex = 0;
-  private readonly ROTATION_SIZE = 5; // 每輪額外掃描的小幣數量
+  private readonly ROTATION_SIZE = 12; // [v4.2] Expanded rotation to 12 assets to ensure variety
   private poolAddressCache: Map<string, PoolInfo[]> = new Map();
 
   constructor(provider: ethers.JsonRpcProvider) {
@@ -100,12 +104,26 @@ export class PoolScanner {
       AERODROME_FACTORY_ABI,
       provider
     );
+    this.baseSwapFactory = new Contract(
+      ADDRESSES.BASESWAP_FACTORY,
+      AERODROME_FACTORY_ABI, // BaseSwap uses UniV2 style factory
+      provider
+    );
 
     // Pre-populate known tokens
-    this.knownTokens.set(ADDRESSES.WETH, { symbol: "WETH", decimals: 18 });
-    this.knownTokens.set(ADDRESSES.USDC, { symbol: "USDC", decimals: 6 });
-    this.knownTokens.set(ADDRESSES.USDbC, { symbol: "USDbC", decimals: 6 });
-    this.knownTokens.set(ADDRESSES.DAI, { symbol: "DAI", decimals: 18 });
+    // Pre-populate known tokens with lowercase addresses for robust matching
+    this.knownTokens.set(ADDRESSES.WETH.toLowerCase(), { symbol: "WETH", decimals: 18 });
+    this.knownTokens.set(ADDRESSES.USDC.toLowerCase(), { symbol: "USDC", decimals: 6 });
+    this.knownTokens.set(ADDRESSES.USDbC.toLowerCase(), { symbol: "USDbC", decimals: 6 });
+    this.knownTokens.set(ADDRESSES.DAI.toLowerCase(), { symbol: "DAI", decimals: 18 });
+    this.knownTokens.set("0x940181a94A35A4569E4529A3CDfB74e38FD98631".toLowerCase(), { symbol: "AERO", decimals: 18 });
+    this.knownTokens.set("0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b".toLowerCase(), { symbol: "VIRTUAL", decimals: 18 });
+    this.knownTokens.set("0xcB7C0000aB88B473B1f5AfD9Ef808440eeD33Bf".toLowerCase(), { symbol: "cbBTC", decimals: 8 });
+    this.knownTokens.set("0x4ed4e862860bed51a9570b96d89af5e1b0efefed".toLowerCase(), { symbol: "DEGEN", decimals: 18 });
+    this.knownTokens.set("0x532f27101965dd16442e59d40670faf5ebb142e4".toLowerCase(), { symbol: "BRETT", decimals: 18 });
+    this.knownTokens.set("0xAC1Bd2465aA515910006945042443b961c7c0146".toLowerCase(), { symbol: "TOSHI", decimals: 18 });
+    this.knownTokens.set("0x05767d9Ef41Dc40689678fFca0608878fb3dE906".toLowerCase(), { symbol: "HIGHER", decimals: 18 });
+    this.knownTokens.set("0x9D092780e037f6aB5812B7D034346899E054e04f".toLowerCase(), { symbol: "KEYCAT", decimals: 18 });
   }
 
   /**
@@ -116,12 +134,19 @@ export class PoolScanner {
   async scanForOpportunities(): Promise<PriceDiscrepancy[]> {
     log.info("🔍 Starting pool scan cycle...");
     const discrepancies: PriceDiscrepancy[] = [];
+    const allSpreads: { symbolA: string, symbolB: string, spread: number }[] = [];
 
     try {
+      const blockNumber = await this.provider.getBlockNumber();
       const tokenPairs = this.generateTokenPairs();
-      log.debug(
-        `Scanning ${tokenPairs.length} token pairs (chunk: ${SCANNER.POOL_SCAN_CHUNK_SIZE}, jitter: ${SCANNER.POOL_SCAN_JITTER_MS}ms)`
-      );
+      
+      const pairsLabels = tokenPairs.map(([a, b]) => {
+        const sA = this.knownTokens.get(a.toLowerCase())?.symbol || a.slice(0, 6);
+        const sB = this.knownTokens.get(b.toLowerCase())?.symbol || b.slice(0, 6);
+        return `${sA}/${sB}`;
+      }).join(", ");
+
+      log.info(`🔍 Scan Cycle | Block: ${blockNumber} | Scanning: ${pairsLabels}`);
 
       // [v3.1] Process token pairs in chunks to avoid RPS spikes.
       // Without chunking, scanning 10 pairs × 2 DEXes = 20+ concurrent eth_calls,
@@ -130,6 +155,9 @@ export class PoolScanner {
       if (!this.poolAddressCache) {
         this.poolAddressCache = new Map<string, any[]>();
       }
+
+      let bestSpreadFound = 0;
+      let bestPairLabel = "None";
 
       for (let i = 0; i < tokenPairs.length; i += SCANNER.POOL_SCAN_CHUNK_SIZE) {
         const chunk = tokenPairs.slice(i, i + SCANNER.POOL_SCAN_CHUNK_SIZE);
@@ -147,20 +175,16 @@ export class PoolScanner {
               let pools;
 
               if (this.poolAddressCache.has(pairKey)) {
-                // Fetch dynamic data (reserves/price) for cached pools
                 const cachedPools = this.poolAddressCache.get(pairKey)!;
-                pools = await Promise.all(cachedPools.map(p => this.updatePoolData(p, tokenA, tokenB)));
-                log.debug(`   ⚡ Cached Pair ${tokenA.slice(0, 6)}...: ${pools.length} pools`);
+                pools = await this.updatePoolsBatch(cachedPools, tokenA, tokenB);
               } else {
-                // Full fetch (addresses + data)
                 pools = await this.getPoolsForPair(tokenA, tokenB);
                 this.poolAddressCache.set(pairKey, pools);
-                log.debug(`   🌐 New Pair ${tokenA.slice(0, 6)}...: ${pools.length} pools`);
               }
 
               return { tokenA, tokenB, pools };
             } catch (err: any) {
-              log.warn(`   ⚠️  Skipping pair ${tokenA.slice(0, 6)} due to RPC error: ${err.message}`);
+              log.warn(`   ⚠️ Skipping pair ${tokenA.slice(0, 6)} due to RPC error: ${err.message}`);
               return { tokenA, tokenB, pools: [] };
             }
           })
@@ -168,59 +192,55 @@ export class PoolScanner {
 
         for (const { tokenA, tokenB, pools } of chunkResults) {
           if (pools.length < 2) continue;
-
           const prices = pools.map((p) => p.price).filter((p) => p > 0);
           if (prices.length < 2) continue;
 
           const maxPrice = Math.max(...prices);
           const minPrice = Math.min(...prices);
+          const spread = ((maxPrice - minPrice) / minPrice) * 100;
 
-          // [Optimization] Factor in DEX fees before declaring an opportunity.
-          // Average DEX fee is 0.3% per hop. For a 2-hop arb, total fee is ~0.6%.
+          const sA = await this.getTokenSymbol(tokenA);
+          const sB = await this.getTokenSymbol(tokenB);
+          allSpreads.push({ symbolA: sA, symbolB: sB, spread });
+
+          if (spread > bestSpreadFound) {
+            bestSpreadFound = spread;
+            bestPairLabel = `${sA}/${sB}`;
+          }
+
           const bestBuy = pools.reduce((a, b) => (a.price < b.price ? a : b));
           const bestSell = pools.reduce((a, b) => (a.price > b.price ? a : b));
-
-          // [v3.5 Fix] Unit-Adaptive Fee Scaling
-          // UniV3: 3000 = 0.3% (divide by 10000) | Others: 30 = 0.3% (divide by 100)
           const getFeePct = (pool: any) => pool.dexId === DexId.UNISWAP_V3 ? pool.fee / 10000 : pool.fee / 100;
           const totalFeesPct = getFeePct(bestBuy) + getFeePct(bestSell);
-
-          const spread = ((maxPrice - minPrice) / minPrice) * 100;
           const netSpread = spread - totalFeesPct;
 
           if (netSpread >= SCANNER.MIN_SPREAD_PCT) {
-
             const symbolA = await this.getTokenSymbol(tokenA);
             const symbolB = await this.getTokenSymbol(tokenB);
-
             discrepancies.push({
-              tokenA,
-              tokenB,
-              symbolA,
-              symbolB,
-              pools,
-              maxSpread: spread,
-              bestBuyPool: bestBuy,
-              bestSellPool: bestSell,
+              tokenA, tokenB, symbolA, symbolB, pools,
+              maxSpread: spread, bestBuyPool: bestBuy, bestSellPool: bestSell,
             });
 
             log.info(
               `🎯 Spread found: ${symbolA}/${symbolB} = ${spread.toFixed(2)}% across ${pools.length} pools`,
-              {
-                buyDex: DexId[bestBuy.dexId],
-                sellDex: DexId[bestSell.dexId],
-              }
+              { buyDex: DexId[bestBuy.dexId], sellDex: DexId[bestSell.dexId] }
             );
           }
         }
-
-        // Small breathing room between chunks
+        
         if (i + SCANNER.POOL_SCAN_CHUNK_SIZE < tokenPairs.length) {
           await sleep(SCANNER.POOL_SCAN_JITTER_MS);
         }
       }
 
-      log.debug(`✅ Scan complete: ${discrepancies.length} opportunities found`);
+      // Summarize Top 3 absolute spreads found this cycle
+      const top3Absolute = allSpreads.sort((a, b) => b.spread - a.spread).slice(0, 3);
+      const topLabels = top3Absolute.length > 0 
+        ? top3Absolute.map(t => `${t.symbolA}/${t.symbolB} (Gross: ${t.spread.toFixed(3)}%)`).join(", ")
+        : "None";
+
+      log.info(`✅ Scan complete: ${discrepancies.length} opportunities. Top spreads: ${topLabels}`);
     } catch (error: any) {
       log.error(`Scan failed: ${error.message}`);
     }
@@ -235,13 +255,13 @@ export class PoolScanner {
     const paths: ArbitragePath[] = [];
 
     for (const disc of discrepancies) {
-      // [v3.3 Fix] Dynamic loan amount: cap at 5% of first pool's reserve for target token
       const firstPool = disc.bestBuyPool;
       const reserveIn = firstPool.token0.toLowerCase() === disc.tokenA.toLowerCase()
         ? firstPool.reserve0
         : firstPool.reserve1;
 
-      let loanAmount = (reserveIn * 5n) / 100n; // 5% buffer
+      // [v4.0 UPGRADE] Increased Loan Capacity: 15% of reserves
+      let loanAmount = (reserveIn * 15n) / 100n; 
 
       // Safety: cap by DEFAULT_LOAN_AMOUNT if reserve is huge, but ensure it's not 0
       if (loanAmount > EXECUTION.DEFAULT_LOAN_AMOUNT) {
@@ -302,16 +322,12 @@ export class PoolScanner {
 
     for (const stable of [false, true]) {
       try {
-        // [v3.1 Fix] Do not scan stable pools for non-stable pairs, as reserve ratio != spot price
-        const isStablePair =
-          (tokenA.toLowerCase() === ADDRESSES.USDC.toLowerCase() && tokenB.toLowerCase() === ADDRESSES.USDbC.toLowerCase()) ||
-          (tokenA.toLowerCase() === ADDRESSES.USDbC.toLowerCase() && tokenB.toLowerCase() === ADDRESSES.USDC.toLowerCase()) ||
-          (tokenA.toLowerCase() === ADDRESSES.DAI.toLowerCase() && tokenB.toLowerCase() === ADDRESSES.USDC.toLowerCase()) ||
-          (tokenA.toLowerCase() === ADDRESSES.USDC.toLowerCase() && tokenB.toLowerCase() === ADDRESSES.DAI.toLowerCase());
+        // [v4.3] Sort tokens to ensure factory compatibility
+        const [t0, t1] = tokenA.toLowerCase() < tokenB.toLowerCase() 
+          ? [tokenA, tokenB] 
+          : [tokenB, tokenA];
 
-        if (stable && !isStablePair) continue;
-
-        const poolAddr = await this.aeroFactory.getPool(tokenA, tokenB, stable);
+        const poolAddr = await this.aeroFactory.getPool(t0, t1, stable);
         if (poolAddr === ethers.ZeroAddress) continue;
 
         const pool = new Contract(poolAddr, AERODROME_POOL_ABI, this.provider);
@@ -356,8 +372,8 @@ export class PoolScanner {
           extraData: ethers.AbiCoder.defaultAbiCoder().encode(["bool"], [stable]),
           liquidityUSD: 0, // Will be calculated later
         });
-      } catch (e) {
-        // Pool doesn't exist for this pair/stability
+      } catch (e: any) {
+        log.debug(`      ❌ Aerodrome scan error for ${tokenA.slice(0, 6)}/${tokenB.slice(0, 6)}: ${e.message}`);
       }
     }
 
@@ -376,7 +392,11 @@ export class PoolScanner {
 
     for (const fee of feeTiers) {
       try {
-        const poolAddr = await this.uniV3Factory.getPool(tokenA, tokenB, fee);
+        const [t0, t1] = tokenA.toLowerCase() < tokenB.toLowerCase() 
+          ? [tokenA, tokenB] 
+          : [tokenB, tokenA];
+
+        const poolAddr = await this.uniV3Factory.getPool(t0, t1, fee);
         if (poolAddr === ethers.ZeroAddress) continue;
 
         const pool = new Contract(poolAddr, UNISWAP_V3_POOL_ABI, this.provider);
@@ -431,10 +451,61 @@ export class PoolScanner {
     // Each DEX query internally makes 2-3 eth_calls.
     // Running them in parallel would double the instantaneous RPS.
     const aeroPools = await this.getAerodromePools(tokenA, tokenB);
-    await sleep(SCANNER.POOL_SCAN_JITTER_MS); // breathing room
+    await sleep(SCANNER.POOL_SCAN_JITTER_MS);
     const uniPools = await this.getUniV3Pools(tokenA, tokenB);
+    await sleep(SCANNER.POOL_SCAN_JITTER_MS);
+    const baseSwapPools = await this.getBaseSwapPools(tokenA, tokenB);
 
-    return [...aeroPools, ...uniPools];
+    if (aeroPools.length + uniPools.length + baseSwapPools.length === 0) {
+      const sA = this.knownTokens.get(tokenA)?.symbol || tokenA.slice(0, 6);
+      const sB = this.knownTokens.get(tokenB)?.symbol || tokenB.slice(0, 6);
+      log.warn(`No pools found for pair: ${sA}-${sB}`);
+    }
+
+    return [...aeroPools, ...uniPools, ...baseSwapPools];
+  }
+
+  /**
+   * Scan BaseSwap pools (UniV2 fork)
+   */
+  private async getBaseSwapPools(tokenA: string, tokenB: string): Promise<PoolInfo[]> {
+    try {
+      const [t0, t1] = tokenA.toLowerCase() < tokenB.toLowerCase() 
+        ? [tokenA, tokenB] 
+        : [tokenB, tokenA];
+
+      const poolAddr = await this.baseSwapFactory.getPair(t0, t1);
+      if (poolAddr === ethers.ZeroAddress) return [];
+
+      const pool = new Contract(poolAddr, AERODROME_POOL_ABI, this.provider);
+      const [reserves, token0] = await Promise.all([
+        pool.getReserves(),
+        pool.token0(),
+      ]);
+
+      if (reserves[0] === 0n || reserves[1] === 0n) return [];
+
+      const price = await this.calculateAeroPrice(
+        reserves[0], reserves[1], token0, 
+        token0.toLowerCase() === tokenA.toLowerCase() ? tokenB : tokenA,
+        tokenA, tokenB, false
+      );
+
+      return [{
+        address: poolAddr,
+        dexId: DexId.BASESWAP,
+        token0,
+        token1: token0.toLowerCase() === tokenA.toLowerCase() ? tokenB : tokenA,
+        tokenA, tokenB,
+        reserve0: reserves[0], reserve1: reserves[1],
+        fee: 25, // 0.25% fee
+        price,
+        liquidityUSD: 0
+      }];
+    } catch (e: any) { 
+      log.debug(`      ❌ BaseSwap scan error for ${tokenA.slice(0, 6)}/${tokenB.slice(0, 6)}: ${e.message}`);
+      return []; 
+    }
   }
 
   /**
@@ -465,9 +536,100 @@ export class PoolScanner {
   }
 
   /**
-   * [v3.2] Update only the dynamic data (reserves/price) for a previously discovered pool.
-   * This saves us from calling the Factory contract every cycle.
+   * [v4.0] Batch update pool data using Multicall3
+   * Collapses N requests into 1 single eth_call.
    */
+  private async updatePoolsBatch(
+    pools: PoolInfo[],
+    tokenA: string,
+    tokenB: string
+  ): Promise<PoolInfo[]> {
+    if (pools.length === 0) return [];
+
+    try {
+      const multicall = new Contract(MULTICALL3_ADDRESS, MULTICALL3_ABI, this.provider);
+      const calls: any[] = [];
+      const poolInterfaceAero = new ethers.Interface(AERODROME_POOL_ABI);
+      const poolInterfaceUni = new ethers.Interface(UNISWAP_V3_POOL_ABI);
+
+      // Prepare calls
+      for (const pool of pools) {
+        if (pool.dexId === DexId.AERODROME || pool.dexId === DexId.BASESWAP) {
+          // Aerodrome/BaseSwap: getReserves
+          calls.push({
+            target: pool.address,
+            allowFailure: true,
+            callData: poolInterfaceAero.encodeFunctionData("getReserves"),
+          });
+        } else if (pool.dexId === DexId.UNISWAP_V3) {
+          // UniV3: slot0 & liquidity (requires 2 calls per pool)
+          calls.push({
+            target: pool.address,
+            allowFailure: true,
+            callData: poolInterfaceUni.encodeFunctionData("slot0"),
+          });
+          calls.push({
+            target: pool.address,
+            allowFailure: true,
+            callData: poolInterfaceUni.encodeFunctionData("liquidity"),
+          });
+        }
+      }
+
+      // Execute single Multicall
+      const results = await multicall.aggregate3(calls);
+      
+      let callIdx = 0;
+      const updatedPools: PoolInfo[] = [];
+
+      for (const pool of pools) {
+        try {
+          let reserve0 = 0n;
+          let reserve1 = 0n;
+          let price = 0;
+
+          if (pool.dexId === DexId.AERODROME || pool.dexId === DexId.BASESWAP) {
+            const res = results[callIdx++];
+            if (!res.success) throw new Error("Aero call failed");
+            
+            const decoded = poolInterfaceAero.decodeFunctionResult("getReserves", res.returnData);
+            reserve0 = decoded[0];
+            reserve1 = decoded[1];
+            
+            price = await this.calculateAeroPrice(
+              reserve0, reserve1, pool.token0, pool.token1, tokenA, tokenB, pool.stable
+            );
+          } else if (pool.dexId === DexId.UNISWAP_V3) {
+            const resSlot0 = results[callIdx++];
+            const resLiq = results[callIdx++];
+            
+            if (!resSlot0.success || !resLiq.success) throw new Error("UniV3 call failed");
+
+            const slot0 = poolInterfaceUni.decodeFunctionResult("slot0", resSlot0.returnData);
+            const liquidity = poolInterfaceUni.decodeFunctionResult("liquidity", resLiq.returnData)[0];
+            
+            reserve0 = BigInt(liquidity); // Proxy for V3
+            reserve1 = BigInt(liquidity);
+            
+            price = await this.calculateUniV3Price(
+              slot0[0], pool.token0, pool.token1, tokenA, tokenB
+            );
+          }
+
+          updatedPools.push({ ...pool, reserve0, reserve1, price });
+        } catch (err) {
+          updatedPools.push({ ...pool, price: 0 }); // Mark as invalid
+        }
+      }
+
+      return updatedPools;
+    } catch (err: any) {
+      log.error(`Multicall failed: ${err.message}. Falling back to single calls.`);
+      // Fallback to sequential updates if multicall fails
+      return Promise.all(pools.map(p => this.updatePoolData(p, tokenA, tokenB)));
+    }
+  }
+
   private async updatePoolData(pool: PoolInfo, tokenA: string, tokenB: string): Promise<PoolInfo> {
     try {
       if (pool.dexId === DexId.AERODROME) {
@@ -568,29 +730,31 @@ export class PoolScanner {
   }
 
   private async getTokenSymbol(address: string): Promise<string> {
-    const cached = this.knownTokens.get(address);
-    if (cached) return cached.symbol;
+    const addr = address.toLowerCase();
+    const cached = this.knownTokens.get(addr);
+    if (cached && cached.symbol) return cached.symbol;
 
     try {
       const token = new Contract(address, ERC20_ABI, this.provider);
       const symbol = await token.symbol();
       const decimals = await token.decimals();
-      this.knownTokens.set(address, { symbol, decimals: Number(decimals) });
+      this.knownTokens.set(addr, { symbol, decimals: Number(decimals) });
       return symbol;
     } catch {
-      return address.slice(0, 8);
+      return address.slice(0, 6);
     }
   }
 
   private async getTokenDecimals(address: string): Promise<number> {
-    const cached = this.knownTokens.get(address);
+    const addr = address.toLowerCase();
+    const cached = this.knownTokens.get(addr);
     if (cached) return cached.decimals;
 
     try {
       const token = new Contract(address, ERC20_ABI, this.provider);
       const decimals = await token.decimals();
       const decNum = Number(decimals);
-      this.knownTokens.set(address, { symbol: "", decimals: decNum });
+      this.knownTokens.set(addr, { symbol: "", decimals: decNum });
       return decNum;
     } catch {
       return 18;

@@ -230,7 +230,12 @@ class IronShieldEngine {
 
       // Build arbitrage paths from discrepancies
       const paths = await this.scanner.buildArbitragePaths(discrepancies);
-      log.debug(`📊 ${paths.length} potential paths identified`);
+      log.info(`📊 ${paths.length} potential paths identified`);
+
+      // Log detected spreads
+      for (const disc of discrepancies) {
+        log.info(`✨ Spread detected: ${disc.symbolA}/${disc.symbolB} | ${disc.maxSpread.toFixed(3)}%`);
+      }
 
       // ── Phase 2: Filter & Audit tokens ───────────────────
       const safePaths = await this.filterPaths(paths);
@@ -311,10 +316,21 @@ class IronShieldEngine {
           break;
         }
 
-        // Skip core tokens (WETH, USDC, etc.) from auditing
-        const coreTokens = [ADDRESSES.WETH, ADDRESSES.USDC, ADDRESSES.USDbC, ADDRESSES.DAI];
+        // [v4.5] Trusted high-liquidity tokens bypass (skip audit and honeypot)
+        const TRUSTED_TOKENS = new Set([
+          ADDRESSES.WETH.toLowerCase(),
+          ADDRESSES.USDC.toLowerCase(),
+          ADDRESSES.USDbC.toLowerCase(),
+          ADDRESSES.DAI.toLowerCase(),
+          "0x940181a94A35A4569E4529A3CDfB74e38FD98631".toLowerCase(), // AERO
+          "0x532f27101965dd16442e59d40670faf5ebb142e4".toLowerCase(), // BRETT
+          "0x4ed4e862860bed51a9570b96d89af5e1b0efefed".toLowerCase(), // DEGEN
+          "0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b".toLowerCase(), // VIRTUAL
+          "0xcB7C0000aB88B473B1f5AfD9Ef808440eeD33Bf".toLowerCase(), // cbBTC
+        ]);
+
         const tokensToAudit = [step.tokenIn, step.tokenOut].filter(
-          (t) => !coreTokens.some((ct) => ct.toLowerCase() === t.toLowerCase())
+          (t) => !TRUSTED_TOKENS.has(t.toLowerCase())
         );
 
         for (const token of tokensToAudit) {
