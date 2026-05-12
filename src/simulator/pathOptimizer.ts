@@ -78,6 +78,19 @@ export class PathOptimizer {
       `✅ Simulation complete: ${profitable.length}/${results.length} profitable paths`
     );
 
+    // [v4.7] Detailed diagnostic for rejected paths (Changed to info for visibility)
+    const failedPaths = results.filter((r) => !r.success || r.profitUSD < EXECUTION.MIN_PROFIT_USD);
+    if (failedPaths.length > 0) {
+      log.info(`❌ Rejected Path Details:`);
+      failedPaths.forEach((r) => {
+        if (r.errorMessage) {
+          log.info(`   ↳ Revert Reason: ${r.errorMessage}`);
+        } else {
+          log.info(`   ↳ Unprofitable: Net Profit $${r.profitUSD.toFixed(4)} (Gross Wei: ${r.netProfit})`);
+        }
+      });
+    }
+
     return results;
   }
 

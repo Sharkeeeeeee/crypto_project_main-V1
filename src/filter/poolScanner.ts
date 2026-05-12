@@ -213,7 +213,6 @@ export class PoolScanner {
           const getFeePct = (pool: any) => pool.dexId === DexId.UNISWAP_V3 ? pool.fee / 10000 : pool.fee / 100;
           const totalFeesPct = getFeePct(bestBuy) + getFeePct(bestSell);
           const netSpread = spread - totalFeesPct;
-
           if (netSpread >= SCANNER.MIN_SPREAD_PCT) {
             const symbolA = await this.getTokenSymbol(tokenA);
             const symbolB = await this.getTokenSymbol(tokenB);
@@ -240,7 +239,7 @@ export class PoolScanner {
         ? top3Absolute.map(t => `${t.symbolA}/${t.symbolB} (Gross: ${t.spread.toFixed(3)}%)`).join(", ")
         : "None";
 
-      log.info(`✅ Scan complete: ${discrepancies.length} opportunities. Top spreads: ${topLabels}`);
+      log.info(`✅ Scan Cycle #${this.cycleCount || 0} | Block: ${this.lastBlock || "unknown"} | Found: ${discrepancies.length} opportunities. Top: ${topLabels}`);
     } catch (error: any) {
       log.error(`Scan failed: ${error.message}`);
     }

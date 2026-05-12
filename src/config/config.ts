@@ -56,7 +56,7 @@ export const SCANNER = {
   // [v3.1] Block-aligned: Base produces blocks every 2s.
   // Polling faster wastes QuickNode API credits for zero benefit.
   SCAN_INTERVAL_MS: parseInt(process.env.SCAN_INTERVAL_MS || "3000"),
-  MIN_SPREAD_PCT: parseFloat(process.env.MIN_SPREAD_PCT || "0.1"),
+  MIN_SPREAD_PCT: 0.1,
   MIN_MARKET_CAP: parseFloat(process.env.MIN_MARKET_CAP || "20000"),
   MAX_MARKET_CAP: parseFloat(process.env.MAX_MARKET_CAP || "200000"),
   MIN_LIQUIDITY_USD: 5000,
