@@ -78,15 +78,16 @@ export class PathOptimizer {
       `✅ Simulation complete: ${profitable.length}/${results.length} profitable paths`
     );
 
-    // [v4.7] Detailed diagnostic for rejected paths (Changed to info for visibility)
+    // [v4.7] Concise diagnostic for rejected paths
     const failedPaths = results.filter((r) => !r.success || r.profitUSD < EXECUTION.MIN_PROFIT_USD);
     if (failedPaths.length > 0) {
-      log.info(`❌ Rejected Path Details:`);
       failedPaths.forEach((r) => {
         if (r.errorMessage) {
-          log.info(`   ↳ Revert Reason: ${r.errorMessage}`);
+          const isLowProfit = r.errorMessage.includes("0x82b42900");
+          const reason = isLowProfit ? "Insufficient Net Profit (after fees/impact)" : r.errorMessage.split("(")[0].trim();
+          log.info(`   ↳ ❌ Rejected: ${reason}`);
         } else {
-          log.info(`   ↳ Unprofitable: Net Profit $${r.profitUSD.toFixed(4)} (Gross Wei: ${r.netProfit})`);
+          log.info(`   ↳ ❌ Below Min Profit: Net $${r.profitUSD.toFixed(4)}`);
         }
       });
     }
@@ -97,111 +98,97 @@ export class PathOptimizer {
   private async simulateSinglePath(path: ArbitragePath): Promise<SimulationResult> {
     const startTime = Date.now();
     const provider = this.forkEngine.getProvider();
+    
+    // [v6.2] Scaling Strategy: Try multiple loan amounts if initial fails
+    const initialLoan = path.loanAmount || EXECUTION.DEFAULT_LOAN_AMOUNT;
+    const scalingFactors = [100n, 50n, 25n]; // Try 100%, 50%, 25%
+    let bestResult: SimulationResult | null = null;
 
-    try {
-      const loanAmount = path.loanAmount || EXECUTION.DEFAULT_LOAN_AMOUNT;
-      const encodedSteps = this.encodeSwapSteps(path.steps, loanAmount);
+    for (const factor of scalingFactors) {
+      try {
+        const loanAmount = (initialLoan * factor) / 100n;
+        if (loanAmount < ethers.parseUnits("0.05", 18) && path.steps[0].tokenIn === ADDRESSES.WETH) break; // Don't bother with tiny trades
 
-      const deadline = Math.floor(Date.now() / 1000) + 300;
-      const minProfit = 0n; // Simulation uses 0; real execution sets proper value
-      
-      const assetAddress = path.steps[0].tokenIn;
-      const assetDecimals = getAssetDecimals(assetAddress);
+        const encodedSteps = this.encodeSwapSteps(path.steps, loanAmount);
+        const deadline = Math.floor(Date.now() / 1000) + 300;
+        const minProfit = 0n;
+        
+        const assetAddress = path.steps[0].tokenIn;
+        const assetDecimals = getAssetDecimals(assetAddress);
+        const executor = new Contract(this.executorAddress, EXECUTOR_ABI, provider);
+        
+        const callData = executor.interface.encodeFunctionData("initiateArbitrage", [
+          assetAddress, loanAmount, minProfit, deadline, encodedSteps,
+        ]);
 
-      const executor = new Contract(this.executorAddress, EXECUTOR_ABI, provider);
-      const callData = executor.interface.encodeFunctionData("initiateArbitrage", [
-        assetAddress,
-        loanAmount,
-        minProfit,
-        deadline,
-        encodedSteps,
-      ]);
+        // [v6.6 Fix] Use the actual owner wallet address to bypass onlyOwner modifier during simulation
+        const wallet = new ethers.Wallet(process.env.PRIVATE_KEY!);
+        const signerAddr = wallet.address;
 
-      const signerAddr = await provider
-        .getSigner()
-        .then((s) => s.address)
-        .catch(() => ethers.ZeroAddress);
+        const simResult = await this.forkEngine.simulateAndGetBalanceChange(
+          this.executorAddress, callData, signerAddr, assetAddress
+        );
 
-      const simResult = await this.forkEngine.simulateAndGetBalanceChange(
-        this.executorAddress,
-        callData,
-        signerAddr,
-        assetAddress
-      );
+        if (!simResult.success) {
+          const err = simResult.error?.toLowerCase() || "";
+          // If it's InsufficientProfit, SwapFailed (0xd229d4ee) or generic revert, we continue to smaller scale
+          if (err.includes("0x82b42900") || err.includes("0xd229d4ee") || err.includes("revert") || err.includes("profit") || err.includes("insufficient")) {
+             log.info(`      📉 Scaling: ${factor}% failed (${err.slice(0, 40)}...). Retrying...`);
+             continue;
+          }
+          log.warn(`      ❌ Fatal Scaling Error: ${err}`);
+          if (!bestResult) {
+            bestResult = { path, success: false, outputAmount: 0n, gasUsed: 0n, netProfit: 0n, profitUSD: 0, errorMessage: simResult.error, executionTimeMs: Date.now() - startTime };
+          }
+          break;
+        }
 
-      if (!simResult.success) {
-        return {
-          path,
-          success: false,
-          outputAmount: 0n,
-          gasUsed: 0n,
-          netProfit: 0n,
-          profitUSD: 0,
-          errorMessage: simResult.error,
+        const gasPrice = await this.forkEngine.getGasPrice();
+        const ethPrice = await getEthPriceUSD();
+        const assetPriceUSD = path.assetPriceUSD || (assetAddress.toLowerCase() === ADDRESSES.WETH.toLowerCase() ? ethPrice : 1.0);
+
+        let actualOutput = simResult.outputAmount;
+        if (simResult.outputAmount === 1n) {
+           actualOutput = loanAmount + (path.estimatedProfit * factor / 100n);
+        }
+
+        const profitInfo = await this.profitCalc.calculateNetProfit(
+          loanAmount, actualOutput, simResult.gasUsed, gasPrice, assetDecimals, assetPriceUSD, callData
+        );
+
+        const currentResult: SimulationResult = {
+          path: { ...path, loanAmount }, 
+          success: profitInfo.isProfitable,
+          outputAmount: simResult.outputAmount,
+          gasUsed: simResult.gasUsed,
+          netProfit: profitInfo.contractProfitRaw,
+          profitUSD: profitInfo.netProfitUSD,
           executionTimeMs: Date.now() - startTime,
         };
-      }
 
-      // [FIX #1] Calculate profit with correct asset decimals and price
-      const gasPrice = await this.forkEngine.getGasPrice();
-      const ethPrice = await getEthPriceUSD();
-      
-      const assetPriceUSD = path.assetPriceUSD || (assetAddress.toLowerCase() === ADDRESSES.WETH.toLowerCase() ? ethPrice : 1.0);
-
-      // [v3.6 Fallback] If outputAmount is 1n, it means we are on a public RPC
-      // and couldn't read the state change. We trust the scanner's estimate
-      // if the simulation (eth_call) succeeded.
-      const actualOutput = simResult.outputAmount === 1n 
-        ? loanAmount + path.estimatedProfit 
-        : simResult.outputAmount;
-
-      const profitInfo = await this.profitCalc.calculateNetProfit(
-        loanAmount,
-        actualOutput,
-        simResult.gasUsed,
-        gasPrice,
-        assetDecimals,
-        assetPriceUSD,
-        callData
-      );
-
-      // [v4.6] Diagnostic Logging
-      if (profitInfo.netProfitUSD < EXECUTION.MIN_PROFIT_USD) {
         log.debug(
-          `📉 Path Rejected: ${path.id} | ` +
+          `      🔍 Scale ${factor}%: ` +
           `Gross: $${profitInfo.contractProfitUSD.toFixed(3)} | ` +
           `Gas: $${profitInfo.totalGasCostUSD.toFixed(3)} | ` +
           `Net: $${profitInfo.netProfitUSD.toFixed(3)}`
         );
-      } else {
-        log.info(
-          `💰 Profitable Path: ${path.id} | ` +
-          `Net Profit: $${profitInfo.netProfitUSD.toFixed(2)}`
-        );
-      }
 
-      return {
-        path,
-        success: profitInfo.isProfitable,
-        outputAmount: simResult.outputAmount,
-        gasUsed: simResult.gasUsed,
-        netProfit: profitInfo.contractProfitRaw,
-        profitUSD: profitInfo.netProfitUSD,
-        executionTimeMs: Date.now() - startTime,
-      };
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
-      return {
-        path,
-        success: false,
-        outputAmount: 0n,
-        gasUsed: 0n,
-        netProfit: 0n,
-        profitUSD: 0,
-        errorMessage: msg,
-        executionTimeMs: Date.now() - startTime,
-      };
+        if (profitInfo.meetsThreshold) {
+          log.info(`   💰 Profitable at ${factor}% scale: $${profitInfo.netProfitUSD.toFixed(2)}`);
+          return currentResult;
+        } else {
+          if (!bestResult || currentResult.profitUSD > bestResult.profitUSD) bestResult = currentResult;
+        }
+      } catch (e) {
+        log.debug(`      ❌ Scaling error at ${factor}%: ${e}`);
+        break;
+      }
     }
+
+    return bestResult || {
+      path, success: false, outputAmount: 0n, gasUsed: 0n, netProfit: 0n, profitUSD: 0,
+      errorMessage: "All scaling attempts failed", executionTimeMs: Date.now() - startTime,
+    };
   }
 
   private encodeSwapSteps(steps: SwapStep[], loanAmount: bigint): string {

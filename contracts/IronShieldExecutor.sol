@@ -295,7 +295,6 @@ contract IronShieldExecutor {
             tokenOut: tokenOut,
             fee: fee,
             recipient: address(this),
-            deadline: deadline,
             amountIn: amountIn,
             amountOutMinimum: 0,
             sqrtPriceLimitX96: 0
@@ -375,7 +374,7 @@ interface IAerodromeRouter {
 }
 
 interface ISwapRouter {
-    struct ExactInputSingleParams { address tokenIn; address tokenOut; uint24 fee; address recipient; uint256 deadline; uint256 amountIn; uint256 amountOutMinimum; uint160 sqrtPriceLimitX96; }
+    struct ExactInputSingleParams { address tokenIn; address tokenOut; uint24 fee; address recipient; uint256 amountIn; uint256 amountOutMinimum; uint160 sqrtPriceLimitX96; }
     function exactInputSingle(ExactInputSingleParams calldata params) external payable returns (uint256 amountOut);
 }
 

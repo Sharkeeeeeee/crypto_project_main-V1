@@ -216,7 +216,8 @@ class IronShieldEngine {
   private async runScanCycle(): Promise<void> {
     this.cycleCount++;
     const cycleStart = Date.now();
-    log.info(`━━━ Cycle #${this.cycleCount} ━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+    console.log("\n\n");
+    log.info(`[CORE] Cycle #${this.cycleCount} starting...`);
 
     try {
       // ── Phase 1: Scan for opportunities ──────────────────
@@ -224,7 +225,6 @@ class IronShieldEngine {
       const discrepancies = await this.scanner.scanForOpportunities();
 
       if (discrepancies.length === 0) {
-        log.debug("No opportunities found this cycle");
         return;
       }
 
@@ -232,10 +232,8 @@ class IronShieldEngine {
       const paths = await this.scanner.buildArbitragePaths(discrepancies);
       log.info(`📊 ${paths.length} potential paths identified`);
 
-      // Log detected spreads
-      for (const disc of discrepancies) {
-        log.info(`✨ Spread detected: ${disc.symbolA}/${disc.symbolB} | ${disc.maxSpread.toFixed(3)}%`);
-      }
+      // Log detected spreads briefly
+      discrepancies.forEach(d => log.info(`✨ Spread: ${d.symbolA}/${d.symbolB} | ${d.maxSpread.toFixed(3)}%`));
 
       // ── Phase 2: Filter & Audit tokens ───────────────────
       const safePaths = await this.filterPaths(paths);
